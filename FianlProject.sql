@@ -360,7 +360,7 @@ WHERE CompanyID IN (2, 3, 4, 5)
 GROUP BY CompanyID;
 
 --with pivot
-SELECT 'Order Count',
+SELECT 'Order Count' AS 'CompanyID',
 [2], [3], [4], [5]
 FROM
 (SELECT CompanyID, OrderID 
