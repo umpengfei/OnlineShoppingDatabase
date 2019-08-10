@@ -16,9 +16,6 @@ CREATE SYMMETRIC KEY TestSymmetricKey
 WITH ALGORITHM = AES_128
 ENCRYPTION BY CERTIFICATE TestCertificate;
 
-OPEN SYMMETRIC KEY TestSymmetricKey
-DECRYPTION BY CERTIFICATE TestCertificate;
-
 CREATE TABLE dbo.Address
  (
  AddressID int NOT NULL PRIMARY KEY ,
@@ -30,6 +27,13 @@ CREATE TABLE dbo.Address
  );
 
 SELECT *
+FROM Address
+
+--Decrypt the Apt Number
+OPEN SYMMETRIC KEY TestSymmetricKey
+DECRYPTION BY CERTIFICATE TestCertificate;
+
+SELECT AddressId, Country, State, City, Street, CONVERT(int, DECRYPTBYKEY(Apt)) AS 'DecryptedApt'
 FROM Address
 
 CREATE TABLE dbo.Email
@@ -51,8 +55,11 @@ CREATE TABLE dbo.Customers
  EmailID int NOT NULL REFERENCES Email(EmailID)
  );
 
-SELECT *
-FROM Customers
+SELECT c.CustomerID, c.AddressID, c.FirstName, c.LastName, c.EmailID, o.OrderID, o.CompanyID,  o.OrderDate
+FROM Customers c
+INNER JOIN
+Orders o
+ON c.CustomerID = o.CustomerID
 
 CREATE TABLE dbo.SaleAssistant
  (
@@ -228,8 +235,31 @@ BEGIN
 	EXEC (@SQL)
 END
 
+--add contraint to allow the delievery Company, only when the price is less than 18
 EXEC CheckConstraintOnDeliveryCompany @ConstraintName='checkCompany', @PriceLimit=18.00;
+
+SELECT *
+FROM DeliveryCompany
+
+--check constraint
+INSERT dbo.DeliveryCompany VALUES(12, 'Fedex', 'International Delievery Company', 10);
+INSERT dbo.DeliveryCompany VALUES(11, 'DHL', 'International Delievery Company', 25);
+
+SELECT *
+FROM DeliveryCompany
+
+--remove constraint
 EXEC deleteConstraintOnDeliveryCompany @ConstraintName='checkCompany';
+
+--check whether constraint has been removed
+INSERT dbo.DeliveryCompany VALUES(11, 'DHL', 'International Delievery Company', 25);
+
+SELECT *
+FROM DeliveryCompany
+
+DELETE dbo.DeliveryCompany WHERE CompanyID = 11;
+DELETE dbo.DeliveryCompany WHERE CompanyID = 12;
+
 
 --view to retrieve the detailed information of all prime customers
 CREATE VIEW vWPrimeCustomerInfo
@@ -267,6 +297,80 @@ GROUP BY b.BankName
 ORDER BY UsedCount DESC
 
 SELECT * FROM vWMostUsedBankBrand
+
+--function to retrive the best-seller product of a certain month
+CREATE FUNCTION FindBestSellerMonth(@theMonth int)
+RETURNS TABLE
+AS
+RETURN(
+	WITH temp AS (
+		SELECT TOP 100 sp.ProductID, SUM(Quantity) AS 'Total Sale'
+		FROM Orders o
+		INNER JOIN Order_Session os
+		ON o.OrderID = os.OrderID
+		INNER JOIN Seller_Product sp
+		ON os.SellerProductID = sp.SellerProductID
+		WHERE MONTH(o.OrderDate) = @theMonth
+		GROUP BY sp.ProductID
+		ORDER BY SUM(Quantity) DESC
+	)
+	SELECT TOP(1) *, @theMonth AS 'Month'
+	FROM temp
+);
+
+SELECT * FROM FindBestSellerMonth(7);
+SELECT * FROM FindBestSellerMonth(1);
+
+SELECT sp.ProductID, SUM(Quantity) AS 'Total Sale'
+FROM Orders o
+INNER JOIN Order_Session os
+ON o.OrderID = os.OrderID
+INNER JOIN Seller_Product sp
+ON os.SellerProductID = sp.SellerProductID
+WHERE MONTH(o.OrderDate) = 7
+GROUP BY sp.ProductID
+ORDER BY SUM(Quantity) DESC
+
+
+--function to fetch all the orders by one customer and generate a multiple value column report
+CREATE FUNCTION GetAllOrders(@customerID int)
+RETURNS TABLE
+AS
+RETURN(
+	SELECT DISTINCT c.CustomerID, COALESCE( STUFF((SELECT  distinct ', '+RTRIM(CAST(OrderID as char))  
+    FROM Orders
+    WHERE CustomerID = @customerID
+    FOR XML PATH('')) , 1, 2, '') , '')  AS 'All Orders'
+	FROM Customers c
+	INNER JOIN Orders o 
+	ON c.CustomerID = o.CustomerID
+	WHERE c.CustomerID = @customerID
+);
+
+SELECT * FROM GetAllOrders(6);
+SELECT * FROM GetAllOrders(1);
+
+SELECT * FROM Orders
+
+--pivot the table to show how many orders one delievery company take
+--without pivot
+SELECT CompanyID, COUNT(OrderID) AS 'Order Count'
+FROM Orders
+WHERE CompanyID IN (2, 3, 4, 5)
+GROUP BY CompanyID;
+
+--with pivot
+SELECT 'Order Count',
+[2], [3], [4], [5]
+FROM
+(SELECT CompanyID, OrderID 
+    FROM Orders) AS SourceTable
+PIVOT
+(
+COUNT(OrderID)
+FOR CompanyID IN ([2], [3], [4], [5])
+) AS PivotTable;
+
 
 
 
